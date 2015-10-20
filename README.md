@@ -25,14 +25,6 @@ Type "help", "copyright", "credits" or "license" for more information.
 
 Note the version number (2.7.10 in this case). If it starts with "3.", you should download version 2.7. If you have questions about any of this, check Python's [excellent online documentation](https://www.python.org/doc/).
 
-The program also uses a Python module called [bleach](https://pypi.python.org/pypi/bleach) to protect itself from hackers trying to mess with your friendly tournament. Bleach basically sanitizes text input so that your database won't get corrupted and you won't be hit with spam. After Python is installed you can install bleach by typing:
-
-```
-pip install bleach
-```
-
-in a Terminal window. If you have any issues, check out [their documentation](http://bleach.readthedocs.org/en/latest/).
-
 The program requires PostgreSQL as a database server, which you can [download here](http://www.postgresql.org/download/). PostgreSQL is an awesome (and free!) database server that's extremely powerful. There are also lots of tutorials and other articles about it all over the Web.
 
 Finally, you'll need [git](http://git-scm.com/download) so that you can clone this project.
