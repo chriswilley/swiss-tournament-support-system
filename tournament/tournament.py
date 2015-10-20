@@ -3,13 +3,33 @@
 # tournament.py -- implementation of a Swiss-system tournament
 #
 
-import bleach
+from contextlib import contextmanager
 import psycopg2
 
 
 def connect():
     """Connect to the PostgreSQL database.  Returns a database connection."""
     return psycopg2.connect("dbname=tournament")
+
+
+@contextmanager
+def get_cursor():
+    """
+    Helper function to cut down on unnecessary code when creating and closing
+    cusrors and database connections. Thanks to the Udacity project review
+    team for the suggestion!
+    """
+    conn = connect()
+    cur = conn.cursor()
+    try:
+        yield cur
+        conn.commit()
+        return
+    except:
+        raise
+    finally:
+        cur.close()
+        conn.close()
 
 
 def deleteMatches(tournament=0):
@@ -19,15 +39,13 @@ def deleteMatches(tournament=0):
       tournament: the ID of the tournament for which to delete matches; if 0,
                     delete all matches in all tournaments
     """
-    conn = connect()
-    cur = conn.cursor()
     sql = 'DELETE FROM matches'
+    data = ('',)
     if (type(tournament) is int and tournament != 0):
-        sql += ' WHERE tournament_id = ' + tournament
-    cur.execute(sql)
-    conn.commit()
-    cur.close()
-    conn.close()
+        sql += ' WHERE tournament_id = %s'
+        data = ('tournament')
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
 
 
 def deletePlayers():
@@ -36,13 +54,9 @@ def deletePlayers():
     This will also delete the player-to-tournament associations for the
     deleted players.
     """
-    conn = connect()
-    cur = conn.cursor()
     sql = 'DELETE FROM registrants'
-    cur.execute(sql)
-    conn.commit()
-    cur.close()
-    conn.close()
+    with get_cursor() as cursor:
+        cursor.execute(sql)
 
 
 def createTournament(t_name):
@@ -53,15 +67,11 @@ def createTournament(t_name):
     Args:
       name: the name of the tournament (need not be unique).
     """
-    conn = connect()
-    cur = conn.cursor()
     sql = 'INSERT INTO tournaments (name) VALUES (%s) RETURNING id'
-    data = (bleach.clean(t_name),)
-    cur.execute(sql, data)
-    tournament_id = cur.fetchone()[0]
-    conn.commit()
-    cur.close()
-    conn.close()
+    data = (t_name,)
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
+        tournament_id = cursor.fetchone()[0]
     return tournament_id
 
 
@@ -72,15 +82,13 @@ def deleteTournament(tournament=0):
     Args:
       tournament: the ID of the tournament to be deleted; if 0, delete all
     """
-    conn = connect()
-    cur = conn.cursor()
     sql = 'DELETE FROM tournaments'
+    data = ('',)
     if (type(tournament) is int and tournament != 0):
-        sql += ' WHERE id = ' + tournament
-    cur.execute(sql)
-    conn.commit()
-    cur.close()
-    conn.close()
+        sql += ' WHERE id = %s'
+        data = (tournament,)
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
 
 
 def countPlayers(tournament=None):
@@ -92,17 +100,15 @@ def countPlayers(tournament=None):
     Args:
       tournament: ID of the tournament for which to count players (optional)
     """
-    conn = connect()
-    cur = conn.cursor()
+    data = ('',)
     if (tournament is not None):
-        sql = 'SELECT COUNT(*) FROM players WHERE tournament_id = '
-        sql += tournament
+        sql = 'SELECT COUNT(*) FROM players WHERE tournament_id = %s'
+        data = (tournament,)
     else:
         sql = 'SELECT COUNT(*) FROM players'
-    cur.execute(sql)
-    player_count = cur.fetchone()[0]
-    cur.close()
-    conn.close()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
+        player_count = cursor.fetchone()[0]
     return player_count
 
 
@@ -119,20 +125,17 @@ def registerPlayer(p_name, tournament=None):
       name: the player's full name (need not be unique).
       tournament: the ID of the tournament to register the player in (optional)
     """
-    conn = connect()
-    cur = conn.cursor()
     sql = 'INSERT INTO registrants (name) VALUES (%s) RETURNING *'
-    data = (bleach.clean(p_name),)
-    cur.execute(sql, data)
+    data = (p_name,)
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
+        new_player = cursor.fetchone()[0]
     if (tournament and type(tournament) is int):
-        new_player = cur.fetchone()[0]
         sql = 'INSERT INTO players (tournament_id, registrant_id) VALUES '
         sql += '(%s, %s)'
         data = (tournament, new_player,)
-        cur.execute(sql, data)
-    conn.commit()
-    cur.close()
-    conn.close()
+        with get_cursor() as cursor:
+            cursor.execute(sql, data)
 
 
 def assignPlayer(player, tournament):
@@ -147,18 +150,11 @@ def assignPlayer(player, tournament):
     """
     if (type(player) is not int or type(tournament) is not int):
         return 'Either the player or the tournament you entered is invalid.'
-    conn = connect()
-    cur = conn.cursor()
     sql = 'INSERT INTO tournament_players (tournament_id, player_id) '
     sql += 'VALUES (%s, %s)'
     data = (tournament, player,)
-    try:
-        cur.execute(sql, data)
-        conn.commit()
-    except psycopg2.Error as e:
-        return e
-    cur.close()
-    conn.close()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
 
 
 def unAssignPlayer(player, tournament):
@@ -170,18 +166,11 @@ def unAssignPlayer(player, tournament):
     """
     if (type(player) is not int or type(tournament) is not int):
         return 'Either the player or the tournament you entered is invalid.'
-    conn = connect()
-    cur = conn.cursor()
     sql = 'DELETE FROM tournament_players WHERE tournament_id = %s AND '
     sql += 'player_id = %s'
     data = (tournament, player,)
-    try:
-        cur.execute(sql, data)
-        conn.commit()
-    except psycopg2.Error as e:
-        return e
-    cur.close()
-    conn.close()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
 
 
 def playerStandings(tournament):
@@ -204,18 +193,15 @@ def playerStandings(tournament):
     if (type(tournament) is not int):
         return 'Tournament is invalid (must be a number).'
 
-    conn = connect()
-    cur = conn.cursor()
     sql = 'SELECT player_id, player_name, count_wins, count_matches, omw FROM '
     sql += 'player_standings WHERE tournament_id = %s'
     data = (tournament,)
-    cur.execute(sql, data)
-    players = cur.fetchall()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
+        players = cursor.fetchall()
     player_list = []
     for player in players:
         player_list.append(player)
-    cur.close()
-    conn.close()
     return player_list
 
 
@@ -244,9 +230,6 @@ def reportMatch(winner, loser, tournament, is_tie=False):
         err_msg += '(must be "True" or "False" (or blank)).'
         return err_msg
 
-    conn = connect()
-    cur = conn.cursor()
-
     if (loser != 0):
         sql = 'INSERT INTO matches (winner, loser, tournament_id, is_tie) '
         sql += 'VALUES (%s, %s, %s, %s)'
@@ -256,14 +239,8 @@ def reportMatch(winner, loser, tournament, is_tie=False):
         sql += '(%s, %s, True)'
         data = (winner, tournament,)
 
-    try:
-        cur.execute(sql, data)
-        conn.commit()
-    except psycopg2.Error, e:
-        return e.pgerror
-
-    cur.close()
-    conn.close()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
 
 
 def swissPairings(tournament):
@@ -293,16 +270,12 @@ def swissPairings(tournament):
     """
     if (type(tournament) is not int):
         return 'Tournament is invalid (must be a number).'
-
-    conn = connect()
-    cur = conn.cursor()
     sql = 'SELECT * FROM swiss_pairings(%s)'
     data = (tournament,)
-    cur.execute(sql, data)
-    pairs = cur.fetchall()
+    with get_cursor() as cursor:
+        cursor.execute(sql, data)
+        pairs = cursor.fetchall()
     pair_list = []
     for pair in pairs:
         pair_list.append(pair)
-    cur.close()
-    conn.close()
     return pair_list

@@ -175,10 +175,15 @@ def testReportMatchesNoRematch():
     standings = playerStandings(tournament_id)
     [id1, id2, id3, id4] = [row[0] for row in standings]
     reportMatch(id1, id2, tournament_id)
-    err = reportMatch(id1, id2, tournament_id)
-    expected_err = 'ERROR:  These two players have faced each other in '
+    err = ''
+    try:
+        reportMatch(id1, id2, tournament_id)
+    except psycopg2.InternalError as e:
+        err = e
+        pass
+    expected_err = 'These two players have faced each other in '
     expected_err += 'this tournament before.\n'
-    if err != expected_err:
+    if str(err) != expected_err:
         raise ValueError("System did not prevent a rematch.")
     print "    7b. System prevents rematches."
 

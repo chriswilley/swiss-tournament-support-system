@@ -40,6 +40,9 @@ CREATE UNIQUE INDEX one_bye_per_tournament ON matches (tournament_id, winner) WH
 
 -- Create Views
 CREATE VIEW player_standings AS
+    -- this view generates a list of player standings based on:
+    --     o number of wins the player has had
+    --     o number of "opponent match wins" (omw) for the player's former opponents
     SELECT
         t.id AS tournament_id,
         p.id AS player_id,
@@ -49,14 +52,14 @@ CREATE VIEW player_standings AS
                 COUNT(id)
             FROM matches
             WHERE winner = p.id OR loser = p.id
-        ) AS count_matches,
+        ) AS count_matches, -- display number of matches the player has been in
         (
             SELECT COUNT(id)
             FROM matches
             WHERE winner = p.id AND is_tie = FALSE
-        ) AS count_wins,
+        ) AS count_wins, -- display the number of wins for the player
         (
-            SELECT SUM(count_wins1)
+            SELECT SUM(count_wins1) -- add up the wins of the player's former opponents
             FROM
                 (
                     SELECT COUNT(p1.id) AS count_wins1
@@ -76,7 +79,7 @@ CREATE VIEW player_standings AS
                             )
                     )
                 ) AS count_all_wins
-        ) AS omw
+        ) AS omw -- display the player's omw score
     FROM
         tournaments t,
         players p,
@@ -89,6 +92,8 @@ CREATE VIEW player_standings AS
         player_id;
 
 CREATE VIEW unmatched_pairs AS
+    -- this view generates a list of players in each tournament who have not yet faced each other
+    -- the view is called by the function swiss_pairings()
     SELECT
         ps.tournament_id,
         ps.player_id AS player_one_id,
@@ -101,9 +106,9 @@ CREATE VIEW unmatched_pairs AS
             SELECT count(id)
             FROM matches
             WHERE winner = player_two.id AND is_tie = FALSE
-        ) AS player_two_wins
+        ) AS player_two_wins -- display player two's wins; this will be used as a sorting mechanism
     FROM
-        player_standings ps,
+        player_standings ps, -- iterate through the player_standings view
         (
             SELECT
                 p1.id,
@@ -112,7 +117,7 @@ CREATE VIEW unmatched_pairs AS
                 players p1,
                 registrants r1
             WHERE p1.registrant_id = r1.id
-        ) AS player_two
+        ) AS player_two -- for each player in player_standings, add a row to the results for another player who has not yet faced player_one
     WHERE
         ps.player_id < player_two.id AND (
             SELECT id
@@ -123,30 +128,36 @@ CREATE VIEW unmatched_pairs AS
                 ) OR (
                     player_two.id = winner AND ps.player_id = loser
                 )
-        ) IS NULL
+        ) IS NULL -- ensure these two players have not met before in the current tournament
     ORDER BY
         player_one_wins DESC,
         player_one_omw DESC,
         player_two_wins DESC,
         player_one_id,
-        player_two_id;
+        player_two_id; -- provide the unmatched_pairs results to swiss_pairings() pre-sorted
 
 -- Create Functions
 CREATE FUNCTION no_rematches() RETURNS TRIGGER
 AS
+-- no_rematches() checks to make sure two players aren't facing each other more than once in a tournament
 $BODY$
 DECLARE
+    -- declare variables
     count_rematches int;
 
 BEGIN
+    -- set initial values for variables
     count_rematches := 0;
 
+    -- search matches table for any instances of the two players meeting before in this tournament
     SELECT COUNT(*) INTO count_rematches FROM matches WHERE tournament_id = NEW.tournament_id AND (winner = NEW.winner AND loser = NEW.loser) OR (winner = NEW.loser AND loser = NEW.winner);
 
     IF count_rematches != 0 THEN
+        -- raise exception if this is a rematch
         RAISE EXCEPTION 'These two players have faced each other in this tournament before.';
         RETURN NULL;
     ELSE
+        -- otherwise let the INSERT continue
         RETURN NEW;
     END IF;
 END
@@ -155,13 +166,16 @@ LANGUAGE plpgsql;
 
 CREATE FUNCTION winner_equals_loser() RETURNS TRIGGER
 AS
+-- winner_equals_loser() checks to make sure that a user has not (presumably inadvertently) entered the same player_id for both winner and loser
 $BODY$
 
 BEGIN
     IF NEW.winner = NEW.loser THEN
+        -- if the player_id is the same for both winner and loser, raise an exception
         RAISE EXCEPTION 'Winner and loser cannot be the same player.';
         RETURN NULL;
     ELSE
+        -- otherwise let the INSERT continue
         RETURN NEW;
     END IF;
 END
@@ -170,6 +184,11 @@ LANGUAGE plpgsql;
 
 CREATE FUNCTION swiss_pairings(tournament int) RETURNS TABLE (player_one_id int, player_one_name text, player_two_id int, player_two_name text)
 AS
+-- swiss_pairings() generates the set of matched pairs based on:
+--     o which players have already faced each other
+--     o how many players are in a tournament
+--     o whether or not a bye needs to be assigned
+--     o player standings as of the time the function is called
 $BODY$
 DECLARE
     -- declare variables
